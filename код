@@ -1,0 +1,234 @@
+import ctypes, keyboard, pygetwindow as gw, webbrowser, customtkinter as ctk
+import sys, os, subprocess, json, psutil
+from PIL import Image
+from tkinter import filedialog, messagebox
+
+ctk.set_appearance_mode("dark")
+
+CONFIG_FILE = "config.json"
+DEFAULT_CONFIG = {
+    "tg_path": "", "bat_path": "",
+    "key_icons": "insert", "key_chrome": "end", "key_gemini": "home"
+}
+
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, "r") as f: return json.load(f)
+    return DEFAULT_CONFIG.copy()
+
+
+def save_config(new_config):
+    with open(CONFIG_FILE, "w") as f: json.dump(new_config, f)
+
+
+config = load_config()
+APP_TITLE = "My PC Helper"
+GEMINI_URL = "https://google.com"
+
+
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+
+# --- ЛОГИКА ---
+def toggle_icons():
+    progman = ctypes.windll.user32.FindWindowW("Progman", None)
+    if progman == 0: progman = ctypes.windll.user32.FindWindowW("WorkerW", None)
+    shell_view = ctypes.windll.user32.GetWindow(progman, 5)
+    ctypes.windll.user32.SendMessageW(shell_view, 0x111, 0x7402, 0)
+
+
+minimized_windows = []
+
+
+def toggle_windows():
+    global minimized_windows
+    if not minimized_windows:
+        for window in gw.getAllWindows():
+            if window.title and window.visible and "chrome" not in window.title.lower() and APP_TITLE not in window.title:
+                try:
+                    window.minimize(); minimized_windows.append(window)
+                except:
+                    continue
+    else:
+        for window in minimized_windows:
+            try:
+                window.restore()
+            except:
+                pass
+        minimized_windows = []
+
+
+def update_hotkeys():
+    keyboard.unhook_all()
+    try:
+        keyboard.add_hotkey(config["key_icons"], toggle_icons)
+        keyboard.add_hotkey(config["key_chrome"], toggle_windows)
+        keyboard.add_hotkey(config["key_gemini"], lambda: webbrowser.open(GEMINI_URL))
+    except:
+        pass
+
+
+update_hotkeys()
+
+
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title(APP_TITLE)
+        self.geometry("460x820")
+        self.attributes('-topmost', True);
+        self.resizable(False, False)
+        self.configure(fg_color="black")
+
+        self.canvas = ctk.CTkCanvas(self, width=460, height=220, bg="black", highlightthickness=0)
+        self.canvas.pack()
+        self.draw_black_hole()
+
+        self.set_btn = ctk.CTkButton(self, text="⚙", width=35, height=35, fg_color="#1a1a1a",
+                                     command=self.open_settings)
+        self.set_btn.place(x=410, y=15)
+
+        ctk.CTkLabel(self, text="ПАНЕЛЬ", font=ctk.CTkFont(size=46, weight="bold")).pack(pady=10)
+
+        self.grid_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.grid_frame.pack(pady=20, padx=20)
+        self.grid_frame.columnconfigure((0, 1, 2), weight=1, minsize=145)
+
+        btns = [
+            ("power_icon.png", "ZAPRET", "#ff4d4d", "#1a0000", lambda: self.run_bat(), 0),
+            ("opt_icon.png", "ОПТИМИЗАЦИЯ", "#888888", "#2b2b2b", lambda: self.run_opt(), 1),
+            ("tg_icon.png", "TG-PROXY", "#5d5dff", "#001a33", lambda: self.run_tg(), 2)
+        ]
+
+        for icon, label, color, bg, func, col in btns:
+            f = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
+            f.grid(row=0, column=col, sticky="nsew")
+            try:
+                img = ctk.CTkImage(Image.open(resource_path(icon)), size=(50, 50))
+                btn = ctk.CTkButton(f, image=img, text="", width=105, height=105, corner_radius=52,
+                                    fg_color=bg, border_width=2, border_color=color, command=func)
+            except:
+                btn = ctk.CTkButton(f, text="?", width=105, height=105, corner_radius=52,
+                                    fg_color=bg, border_width=2, border_color=color, command=func)
+            btn.pack(pady=5)
+            ctk.CTkLabel(f, text=label, font=ctk.CTkFont(size=12, weight="bold"), text_color=color).pack()
+
+        self.binds_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.binds_frame.pack(pady=35)
+        self.render_binds()
+
+        ctk.CTkButton(self, text="ВЫКЛЮЧИТЬ ПАНЕЛЬ", fg_color="#330000", text_color="#ff4d4d",
+                      font=ctk.CTkFont(size=16, weight="bold"), height=50, command=lambda: sys.exit()).pack(pady=10)
+        ctk.CTkLabel(self, text="Gemini & Kornesh", font=ctk.CTkFont(size=12, weight="bold"), text_color="#222").pack()
+
+    def render_binds(self):
+        for w in self.binds_frame.winfo_children(): w.destroy()
+        items = [(config["key_icons"], "ИКОНКИ"), (config["key_chrome"], "БРАУЗЕР"), (config["key_gemini"], "GEMINI")]
+        for k, d in items:
+            f = ctk.CTkFrame(self.binds_frame, fg_color="#080808", corner_radius=12, border_width=1,
+                             border_color="#1a1a1a")
+            f.pack(pady=6, padx=60, fill="x")
+            ctk.CTkLabel(f, text=k.upper(), text_color="#5d5dff", font=ctk.CTkFont(size=17, weight="bold")).pack(
+                side="left", padx=20, pady=10)
+            ctk.CTkLabel(f, text=f"—  {d}", font=ctk.CTkFont(size=15, weight="bold"), text_color="white").pack(
+                side="left")
+
+    def open_settings(self):
+        win = ctk.CTkToplevel(self);
+        win.title("Настройки");
+        win.geometry("400x650");
+        win.attributes("-topmost", True)
+
+        ctk.CTkLabel(win, text="ФАЙЛЫ", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=15)
+        ctk.CTkButton(win, text="ВЫБРАТЬ ПУТЬ TG-PROXY", height=40, command=lambda: self.set_p("tg_path")).pack(pady=5,
+                                                                                                                padx=30,
+                                                                                                                fill="x")
+        ctk.CTkButton(win, text="ВЫБРАТЬ ПУТЬ ZAPRET", height=40, command=lambda: self.set_p("bat_path")).pack(pady=5,
+                                                                                                               padx=30,
+                                                                                                               fill="x")
+
+        ctk.CTkLabel(win, text="ГОРЯЧИЕ КЛАВИШИ", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=15)
+        e1 = ctk.CTkEntry(win, width=250, placeholder_text=f"Иконки ({config['key_icons']})");
+        e1.pack(pady=3)
+        e2 = ctk.CTkEntry(win, width=250, placeholder_text=f"Браузер ({config['key_chrome']})");
+        e2.pack(pady=3)
+        e3 = ctk.CTkEntry(win, width=250, placeholder_text=f"Gemini ({config['key_gemini']})");
+        e3.pack(pady=3)
+
+        def save():
+            if e1.get(): config["key_icons"] = e1.get().lower()
+            if e2.get(): config["key_chrome"] = e2.get().lower()
+            if e3.get(): config["key_gemini"] = e3.get().lower()
+            save_config(config);
+            update_hotkeys();
+            self.render_binds();
+            win.destroy()
+            messagebox.showinfo("Панель", "Настройки сохранены!")
+
+        ctk.CTkButton(win, text="СОХРАНИТЬ", fg_color="green", font=ctk.CTkFont(weight="bold"), height=45,
+                      command=save).pack(pady=20)
+
+        # --- КНОПКА СБРОСА ---
+        def reset():
+            if messagebox.askyesno("Сброс", "Удалить все настройки и пути?"):
+                if os.path.exists(CONFIG_FILE): os.remove(CONFIG_FILE)
+                global config;
+                config = DEFAULT_CONFIG.copy()
+                update_hotkeys();
+                self.render_binds();
+                win.destroy()
+                messagebox.showinfo("Панель", "Настройки сброшены!")
+
+        ctk.CTkButton(win, text="СБРОСИТЬ ВСЕ НАСТРОЙКИ", fg_color="#1a1a1a", text_color="gray",
+                      font=ctk.CTkFont(size=11), command=reset).pack(side="bottom", pady=20)
+
+    def set_p(self, key):
+        p = filedialog.askopenfilename();
+        if p: config[key] = p; save_config(config)
+
+    def run_opt(self):
+        c = 0
+        for p in psutil.process_iter(['name']):
+            try:
+                if any(x in p.info['name'].lower() for x in ["steam", "discord", "spotify"]): p.kill(); c += 1
+            except:
+                continue
+        ctypes.windll.psapi.EmptyWorkingSet(ctypes.windll.kernel32.GetCurrentProcess())
+        messagebox.showinfo("Панель", f"Оптимизация: закрыто {c} процессов.")
+
+    def run_tg(self):
+        if config["tg_path"] and os.path.exists(config["tg_path"]):
+            subprocess.Popen(config["tg_path"])
+        else:
+            messagebox.showwarning("!", "Укажите путь к TG-PROXY")
+
+    def run_bat(self):
+        if config["bat_path"] and os.path.exists(config["bat_path"]):
+            subprocess.Popen(f'start "" "{config["bat_path"]}"', shell=True, cwd=os.path.dirname(config["bat_path"]))
+        else:
+            messagebox.showwarning("!", "Укажите путь к ZAPRET")
+
+    def draw_black_hole(self):
+        cx, cy = 230, 110
+        for i in range(40, 0, -1):
+            v = int(10 + (i * 1.2));
+            color = f"#{v:02x}{v:02x}{min(v + 40, 255):02x}"
+            self.canvas.create_oval(cx - 140 + i, cy - 30 + i // 4, cx + 140 - i, cy + 30 - i // 4, outline=color,
+                                    width=1)
+            self.canvas.create_arc(cx - 60 - i // 3, cy - 65 + i // 4, cx + 60 + i // 3, cy + 55 - i // 4, start=10,
+                                   extent=160, outline=color, width=1, style="arc")
+            self.canvas.create_arc(cx - 60 - i // 3, cy - 55 + i // 4, cx + 60 + i // 3, cy + 65 - i // 4, start=190,
+                                   extent=160, outline=color, width=1, style="arc")
+        self.canvas.create_oval(cx - 58, cy - 58, cx + 58, cy + 58, fill="black", width=1)
+        self.canvas.create_line(cx - 130, cy, cx + 130, cy, fill="#a0b0ff", width=1)
+
+
+if __name__ == "__main__":
+    app = App();
+    app.mainloop()
